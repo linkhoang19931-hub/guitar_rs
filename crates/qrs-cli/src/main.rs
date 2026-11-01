@@ -60,6 +60,12 @@ enum Cmd {
         #[arg(long)]
         files: bool,
     },
+    /// Turn a MusicXML tab (.musicxml, .mxl) into a .feedpak (next to it unless -o says where)
+    Musicxml {
+        file: PathBuf,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Extract files from a .psarc
     Extract {
         file: PathBuf,
@@ -425,6 +431,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     if let Cmd::Sums { files, output } = &cli.command {
         return cmd_sums(files, output.as_deref());
     }
+    if let Cmd::Musicxml { file, output } = &cli.command {
+        return cmd_musicxml(file, output.clone());
+    }
     let keys = keys(cli.keys.as_deref())?;
     match cli.command {
         Cmd::Info { file, files } => cmd_info(&keys, &file, files),
@@ -564,7 +573,27 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Cmd::VerifyLibrary(args) => verify::run(&keys, args),
         Cmd::Sums { .. } => Ok(()), // (done before the keys are read: a release machine has none)
+        Cmd::Musicxml { .. } => Ok(()), // (cũng làm trước khi đọc khoá: MusicXML không cần khoá)
     }
+}
+
+/// MusicXML → feedpak (không cần khoá của Rocksmith).
+fn cmd_musicxml(file: &Path, output: Option<PathBuf>) -> anyhow::Result<()> {
+    use qrs_library::musicxml;
+    let out = output.unwrap_or_else(|| musicxml::feedpak_path_for(file));
+    let r = musicxml::convert(file, &out).map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+    println!(
+        "{}: parts {}; {} notes, {} chords, {} bars at {:.0} BPM; {:.1}s -> {}",
+        r.title,
+        r.parts.join(", "),
+        r.notes,
+        r.chords,
+        r.bars,
+        r.bpm,
+        r.duration,
+        out.display()
+    );
+    Ok(())
 }
 
 fn cmd_feedpak(

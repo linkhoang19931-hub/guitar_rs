@@ -1,5 +1,6 @@
 //! Finding songs: every `.psarc`, `.feedpak` and `.sloppak` (file, or folder with a manifest) in the library
-//! folders, read into a cached index keyed by path + size + modification time, so later launches only read what
+//! folders (a MusicXML tab, `.musicxml` / `.mxl`, is first turned into a `.feedpak` beside it: `crate::musicxml`),
+//! read into a cached index keyed by path + size + modification time, so later launches only read what
 //! changed (port of rsplay/library.py, for both formats). Multi-song psarcs (songs.psarc, RS1 packs) list each song.
 
 use std::path::{Path, PathBuf};
@@ -120,9 +121,20 @@ pub fn find_song_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
         for p in items {
             let ext = ext_of(&p);
             if ext == "feedpak" || ext == "sloppak" {
-                out.push(p); // a file or a folder pack
+                if !out.contains(&p) {
+                    out.push(p); // a file or a folder pack
+                }
             } else if p.is_dir() {
                 walk(&p, out);
+            } else if (ext == "musicxml" || ext == "mxl" || ext == "xml") && crate::musicxml::is_musicxml(&p)
+            {
+                // bài MusicXML có tab: chuyển thành feedpak cạnh file gốc (chỉ khi chưa có hoặc file gốc mới hơn)
+                if let Ok(fp) = crate::musicxml::ensure_feedpak(&p)
+                    && fp.exists()
+                    && !out.contains(&fp)
+                {
+                    out.push(fp);
+                }
             } else if ext == "psarc" {
                 let stem = p
                     .file_stem()

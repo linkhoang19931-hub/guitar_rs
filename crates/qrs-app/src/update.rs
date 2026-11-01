@@ -27,10 +27,11 @@ use std::time::Duration;
 
 use qrs_library::Config;
 
-/// The public repo's latest release (GitHub's API).
-pub const LATEST_API: &str = "https://api.github.com/repos/arpan2711/quickRS-player/releases/latest";
+/// The latest release (GitHub's API). Bản này (có nhập MusicXML) cập nhật từ repo guitar_rs, không phải repo gốc,
+/// để bản cập nhật không ghi đè mất tính năng MusicXML.
+pub const LATEST_API: &str = "https://api.github.com/repos/linkhoang19931-hub/guitar_rs/releases/latest";
 /// Its page, for when the app can't update itself.
-pub const RELEASES_PAGE: &str = "https://github.com/arpan2711/quickRS-player/releases/latest";
+pub const RELEASES_PAGE: &str = "https://github.com/linkhoang19931-hub/guitar_rs/releases/latest";
 pub const SUMS_NAME: &str = "SHA256SUMS.txt";
 /// Automatic checks at most this often.
 const CHECK_EVERY_S: u64 = 24 * 3600;
@@ -705,7 +706,7 @@ pub fn wait_for_exit(pid: u32) {
 }
 
 /// A new issue on the public repo (Settings > Updates > Report a bug; owner request, 2026-10-29).
-pub const ISSUES_NEW: &str = "https://github.com/arpan2711/quickRS-player/issues/new";
+pub const ISSUES_NEW: &str = "https://github.com/linkhoang19931-hub/guitar_rs/issues/new";
 
 /// The bug report's page: a new issue with the version and OS filled in and a short form to fill (nothing else from
 /// this computer: no paths, no device names).

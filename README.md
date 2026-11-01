@@ -1,3 +1,8 @@
+> **Bản `guitar_rs`: quickRS + nhập bài MusicXML.** Kéo một thư mục chứa file `.musicxml` / `.mxl` (tab xuất
+> từ Guitar Pro, MuseScore, TuxGuitar…) vào cửa sổ quickRS để tập như bài Rocksmith: tab cuộn, vòng lặp, giảm
+> tốc, chấm điểm. Hướng dẫn: [docs/MUSICXML.md](docs/MUSICXML.md). Bản Mac được build tự động ở mục *Actions* /
+> *Releases* của repo này. Dựa trên [quickRS](https://github.com/arpan2711/quickRS-player) của arpan2711 (MIT).
+
 quickRS
 -------
 

@@ -1142,6 +1142,14 @@ impl eframe::App for QuickRs {
                     self.open_dropped(path);
                     break;
                 }
+                // bài MusicXML có tab: chuyển thành feedpak cạnh file gốc rồi mở như một bài bình thường
+                if qrs_library::musicxml::is_musicxml(&path) {
+                    match qrs_library::musicxml::ensure_feedpak(&path) {
+                        Ok(fp) => self.open_dropped(fp),
+                        Err(e) => self.state.say_error(format!("Couldn't read that MusicXML: {e}")),
+                    }
+                    break;
+                }
             }
         }
         // F2: the settings panel, over whatever page is showing (not while a song is loading, nor the first-time
