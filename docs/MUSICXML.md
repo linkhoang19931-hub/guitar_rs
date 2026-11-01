@@ -42,7 +42,7 @@ Dòng lệnh (không bắt buộc):
 - **Guitar (synth)**: tiếng guitar tổng hợp chơi đúng tab.
 - **Click**: tiếng gõ nhịp, có **một ô đếm vào** trước khi bài bắt đầu.
 
-Hai kênh tách riêng: trong bộ trộn có thể tắt tiếng guitar để chỉ còn tiếng nhịp và tự chơi.
+Mỗi bè một kênh synth riêng, cộng kênh Click: trong bộ trộn bật/tắt từng kênh, ví dụ chỉ giữ tiếng nhịp để tự chơi.
 
 ## Giới hạn
 
@@ -50,3 +50,22 @@ Hai kênh tách riêng: trong bộ trộn có thể tắt tiếng guitar để c
 - Chỉ đọc dạng `score-partwise` (dạng phổ biến; Guitar Pro, MuseScore đều xuất dạng này).
 - Ngón bấm của hợp âm chưa được ghi (bảng nốt hiện hình hợp âm nhưng không có số ngón).
 - Chưa đọc: D.S./D.C./Coda, palm mute ghi bằng chữ "P.M." kéo dài nhiều nốt, bend nhiều đoạn.
+
+## Ghép bản thu (file nhạc gốc)
+
+Đặt file nhạc **cùng tên** cạnh file MusicXML, ví dụ `Bài.musicxml` + `Bài.mp3` (nhận `.mp3`, `.ogg`, `.wav`,
+`.flac`, `.opus`), rồi bấm F5. quickRS tự căn tab cho khớp bản thu: tìm giây mà ô 1 bắt đầu và tốc độ thật của bản
+thu (bản thu thường nhanh/chậm hơn tốc độ ghi trong tab vài phần trăm). Trong bộ trộn (Controls → PITCH & STEMS):
+
+- **Song (recording)**: bản thu, bật sẵn
+- **Lead / Rhythm / Bass (synth)** và **Click**: tắt sẵn khi có bản thu, bật lại khi cần
+
+Nếu căn chưa khớp (nốt rơi sớm/muộn so với nhạc), tạo file `Bài.audio.json` cạnh đó:
+
+```json
+{"offset": 1.25, "tempo_scale": 1.0}
+```
+
+`offset` là giây trong bản thu mà ô 1 của tab bắt đầu; `tempo_scale` lớn hơn 1 khi bản thu chậm hơn tab
+(1.03 = chậm hơn 3%). Lưu file, bấm F5. `quickrs-cli musicxml Bài.musicxml` in ra kết quả tự căn để làm điểm xuất phát.
+Bản thu có đoạn nhanh dần/chậm dần (không đánh theo máy đếm nhịp) chỉ khớp được trung bình.

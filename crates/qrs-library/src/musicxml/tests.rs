@@ -132,7 +132,7 @@ fn bass_part_and_drop_tuning() {
     assert!(p.is_bass);
     assert_eq!(p.open_midi, vec![26, 33, 38, 43]);
     assert_eq!(p.notes[0].string, 0);
-    let (files, sum) = build_score(&s, "bass").unwrap();
+    let (files, sum) = build_score(&s, "bass", None).unwrap();
     assert_eq!(sum.parts, vec!["Bass".to_string()]);
     let m = String::from_utf8(files["manifest.yaml"].clone()).unwrap();
     assert!(m.contains("tuning: [-2, 0, 0, 0]"), "{m}");

@@ -9,8 +9,12 @@
 //!   stems/<bè>.wav           tiếng tổng hợp của từng bè (Lead, Rhythm, Bass…), mỗi bè một kênh riêng
 //!   stems/click.wav          tiếng gõ nhịp, có một ô đếm vào trước khi bài bắt đầu
 //!
-//! Hai stem tách riêng nên trong bộ trộn (mixer) của quickRS có thể tắt tiếng guitar để tự chơi theo nhịp.
+//! Các stem tách riêng nên trong bộ trộn (mixer) của quickRS có thể tắt tiếng từng bè để tự chơi theo nhịp.
+//!
+//! Có bản thu cùng tên cạnh file (`Bài.mp3`…): nó thành stem `song` (bật sẵn), tab được tự căn cho khớp với bản thu
+//! (xem `audio`), tiếng synth và tiếng gõ nhịp tắt sẵn (bật lại được trong bộ trộn).
 
+pub mod audio;
 pub mod parse;
 pub mod synth;
 
@@ -27,7 +31,7 @@ use parse::{Score, TabNote};
 pub const SUFFIXES: [&str; 2] = ["musicxml", "mxl"];
 
 /// Đổi khi cách chuyển thay đổi, để các feedpak cũ được tạo lại.
-pub const IMPORTER_VERSION: &str = "2";
+pub const IMPORTER_VERSION: &str = "3";
 
 const GUITAR_STD: [i32; 6] = [40, 45, 50, 55, 59, 64];
 const BASS_STD: [i32; 6] = [28, 33, 38, 43, 47, 52];
@@ -56,7 +60,17 @@ fn mtime(p: &Path) -> Option<std::time::SystemTime> {
 
 /// Cần tạo (lại) feedpak không: chưa có, cũ hơn file MusicXML, hoặc do bản nhập cũ tạo ra.
 pub fn needs_update(src: &Path, out: &Path) -> bool {
-    match (mtime(src), mtime(out)) {
+    // file mới nhất trong nhóm: bản nhạc, bản thu cùng tên, file căn tay
+    let newest = [
+        Some(src.to_path_buf()),
+        audio::find_audio(src),
+        Some(audio::align_file(src)),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|p| mtime(&p))
+    .max();
+    match (newest, mtime(out)) {
         (Some(s), Some(o)) if o >= s => !made_by_current_importer(out),
         (_, None) => true,
         _ => true,
@@ -106,6 +120,8 @@ pub struct Summary {
     pub bars: usize,
     pub duration: f64,
     pub bpm: f64,
+    /// Có bản thu: (giây của ô 1 trong bản thu, hệ số tốc độ).
+    pub audio: Option<(f64, f64)>,
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -443,11 +459,44 @@ pub fn build(src: &Path) -> Res<(BTreeMap<String, Vec<u8>>, Summary)> {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "MusicXML".into());
     let score = parse::parse(&text, &stem)?;
-    build_score(&score, &stem)
+    let rec = match audio::find_audio(src) {
+        Some(path) => {
+            let bytes = std::fs::read(&path).map_err(|e| XmlError(format!("{}: {e}", path.display())))?;
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("mp3")
+                .to_lowercase();
+            let (mono, rate) = audio::decode_mono(&bytes, &ext).map_err(XmlError)?;
+            Some(Recording {
+                length: mono.len() as f64 / rate as f64,
+                curve: audio::onset_curve(&mono, rate),
+                bytes,
+                ext,
+                manual: audio::manual_align(src),
+            })
+        }
+        None => None,
+    };
+    build_score(&score, &stem, rec.as_ref())
+}
+
+/// Bản thu đi kèm bài (đã giải mã để căn khớp).
+pub struct Recording {
+    pub bytes: Vec<u8>,
+    pub ext: String,
+    pub length: f64,
+    pub curve: Vec<f32>,
+    /// Căn tay từ `Bài.audio.json`: (offset, tempo_scale).
+    pub manual: Option<(f64, f64)>,
 }
 
 /// Dựng feedpak từ bản nhạc đã đọc (tách riêng để kiểm thử).
-pub fn build_score(score: &Score, file_stem: &str) -> Res<(BTreeMap<String, Vec<u8>>, Summary)> {
+pub fn build_score(
+    score: &Score,
+    file_stem: &str,
+    rec: Option<&Recording>,
+) -> Res<(BTreeMap<String, Vec<u8>>, Summary)> {
     let first = score.bars.first().cloned().unwrap_or(parse::Bar {
         q: 0.0,
         len_q: 4.0,
@@ -460,19 +509,40 @@ pub fn build_score(score: &Score, file_stem: &str) -> Res<(BTreeMap<String, Vec<
         .map(|t| t.1)
         .unwrap_or(120.0)
         .clamp(10.0, 400.0);
-    // một ô đếm vào trước bài
-    let count_in = first.beats as f64 * first.beat_q * 60.0 / bpm0;
-    let tm = TempoMap::new(&score.tempos, count_in);
+    // có bản thu: căn tab cho khớp (ô 1 rơi vào giây `offset` của bản thu, tốc độ nhân với 1 / tempo_scale);
+    // không có: một ô đếm vào trước bài
+    let align = rec.map(|r| {
+        r.manual.unwrap_or_else(|| {
+            let tm0 = TempoMap::new(&score.tempos, 0.0);
+            let mut times: Vec<f64> = score
+                .parts
+                .iter()
+                .flat_map(|p| p.notes.iter().map(|n| tm0.sec(n.q)))
+                .collect();
+            times.sort_by(f64::total_cmp);
+            times.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
+            audio::align(&times, &r.curve)
+        })
+    });
+    let (start, scale) = match align {
+        Some((off, sc)) => (off, sc),
+        None => (first.beats as f64 * first.beat_q * 60.0 / bpm0, 1.0),
+    };
+    let tempos: Vec<(f64, f64)> = score.tempos.iter().map(|&(q, b)| (q, b / scale)).collect();
+    let tm = TempoMap::new(&tempos, start);
     let song_end = tm.sec(score.end_q);
-    let duration = song_end + 1.0;
+    let duration = (song_end + 1.0).max(rec.map_or(0.0, |r| r.length));
 
-    // phách và ô nhịp: các phách đếm vào không thuộc ô nào, để ô đầu tiên của bài vẫn là ô 1
+    // phách và ô nhịp: các phách đếm vào (trước ô 1) không thuộc ô nào, để ô đầu tiên của bài vẫn là ô 1
     let mut beats: Vec<Value> = Vec::new();
     let mut clicks: Vec<(f64, bool)> = Vec::new();
-    for k in 0..first.beats {
-        let t = k as f64 * first.beat_q * 60.0 / bpm0;
-        beats.push(json!({"time": r3(t), "measure": -1}));
-        clicks.push((t, k == 0));
+    let beat_s = first.beat_q * 60.0 / (bpm0 / scale);
+    for k in (1..=first.beats).rev() {
+        let t = start - k as f64 * beat_s;
+        if t >= -1e-6 {
+            beats.push(json!({"time": r3(t.max(0.0)), "measure": -1}));
+            clicks.push((t.max(0.0), k == first.beats));
+        }
     }
     for (i, b) in score.bars.iter().enumerate() {
         for k in 0..b.beats {
@@ -551,12 +621,21 @@ pub fn build_score(score: &Score, file_stem: &str) -> Res<(BTreeMap<String, Vec<
             .map_err(|e| XmlError(e.to_string()))?,
     );
     let mut stems: Vec<Value> = Vec::new();
+    // có bản thu: nó phát sẵn, tiếng synth và tiếng gõ nhịp tắt sẵn (bật lại được trong bộ trộn)
+    let synth_on = rec.is_none();
+    if let Some(r) = rec {
+        let file = format!("stems/song.{}", r.ext);
+        files.insert(file.clone(), r.bytes.clone());
+        stems.push(json!({"id": "song", "file": file, "name": "Song (recording)", "default": true}));
+    }
     for (p, voices) in parts_out.iter().zip(&part_voices) {
         let file = format!("stems/{}.wav", p.id);
         files.insert(file.clone(), synth::wav(&synth::render_guitar(voices, duration)));
-        stems.push(json!({"id": p.id, "file": file, "name": format!("{} (synth)", p.name), "default": true}));
+        stems.push(
+            json!({"id": p.id, "file": file, "name": format!("{} (synth)", p.name), "default": synth_on}),
+        );
     }
-    stems.push(json!({"id": "click", "file": "stems/click.wav", "name": "Click", "default": true}));
+    stems.push(json!({"id": "click", "file": "stems/click.wav", "name": "Click", "default": synth_on}));
     files.insert(
         "stems/click.wav".into(),
         synth::wav(&synth::render_click(&clicks, duration)),
@@ -578,12 +657,15 @@ pub fn build_score(score: &Score, file_stem: &str) -> Res<(BTreeMap<String, Vec<
     manifest.insert("artist".into(), json!(artist));
     manifest.insert("duration".into(), json!(r3(duration)));
     manifest.insert("arrangements".into(), Value::Array(arrs));
-    manifest.insert(
-        "stems".into(),
-        Value::Array(stems),
-    );
+    manifest.insert("stems".into(), Value::Array(stems));
     manifest.insert("song_timeline".into(), json!("song_timeline.json"));
     manifest.insert("musicxml_importer".into(), json!(IMPORTER_VERSION));
+    if align.is_some() {
+        manifest.insert(
+            "musicxml_audio".into(),
+            json!({"offset": r3(start), "tempo_scale": (scale * 10_000.0).round() / 10_000.0}),
+        );
+    }
     let yaml = manifest_yaml(
         &manifest,
         &format!("Made by quickRS from {file_stem} (MusicXML)."),
@@ -599,6 +681,7 @@ pub fn build_score(score: &Score, file_stem: &str) -> Res<(BTreeMap<String, Vec<
         bars: score.bars.len(),
         duration,
         bpm: bpm0,
+        audio: align,
     };
     Ok((files, summary))
 }

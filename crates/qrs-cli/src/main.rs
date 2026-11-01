@@ -593,6 +593,12 @@ fn cmd_musicxml(file: &Path, output: Option<PathBuf>) -> anyhow::Result<()> {
         r.duration,
         out.display()
     );
+    if let Some((off, scale)) = r.audio {
+        println!(
+            "  ban thu: o 1 bat dau o giay {off:.2}, toc do {:.1}% so voi tab (sua tay trong <bai>.audio.json)",
+            100.0 / scale
+        );
+    }
     Ok(())
 }
 

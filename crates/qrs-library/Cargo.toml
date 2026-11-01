@@ -17,6 +17,7 @@ image.workspace = true
 directories.workspace = true
 zip.workspace = true
 roxmltree.workspace = true
+symphonia.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
