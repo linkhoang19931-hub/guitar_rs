@@ -114,6 +114,8 @@ pub struct Highway {
     pub speed: usize,
     /// Index in `CAMERAS`.
     pub camera: usize,
+    /// Chữ ghi tên kỹ thuật (BEND, HAMMER-ON, PALM MUTE…) phía trên nốt sắp tới, cho người mới học.
+    pub labels: bool,
     cache: Option<Cache>,
     /// When each scorer group was judged (for the burst / cross), cleared when its judgement goes (a seek back).
     judged: Vec<Option<(Judgement, f64)>>,
@@ -133,9 +135,10 @@ fn cam_opts() -> CamOpts {
 }
 
 impl Highway {
-    pub fn new(invert: bool, speed: usize, camera: usize) -> Highway {
+    pub fn new(invert: bool, speed: usize, camera: usize, labels: bool) -> Highway {
         Highway {
             invert,
+            labels,
             speed: speed.min(SPEEDS.len() - 1),
             camera: camera.min(CAMERAS.len() - 1),
             cache: None,
@@ -368,6 +371,7 @@ impl Highway {
             .map(|j| j.map(|(k, at)| (k, (clock() - at).max(0.0) as f32)))
             .collect();
         let invert = self.invert;
+        let labels = self.labels;
         let speed = SPEEDS[self.speed] as f64;
         let n_str = chart.n_strings.clamp(4, 6);
         let camera = self.camera;
@@ -382,7 +386,7 @@ impl Highway {
             let across = (fr - fl).clamp(10.55, 14.0);
             (((fl + fr) / 2.0 + (0.5 - 0.459) * across) as f32, across as f32)
         };
-        draw(&p, well, c, cam, now, n_str, invert, speed, &marks);
+        draw(&p, well, c, cam, now, n_str, invert, speed, &marks, labels);
         let out = self.tools(ui, well);
         ui.ctx().request_repaint();
         out
@@ -405,7 +409,16 @@ impl Highway {
             .sum();
         let rs_w = super::PlayerView::rs_highway_w(&ctx);
         let w = snap(
-            2.0 * pad + rs_w + div_gap + label_w + 2.0 * pill + gap + 2.0 * div_gap + px(1.0) + key + px(4.0),
+            2.0 * pad
+                + rs_w
+                + div_gap
+                + label_w
+                + 2.0 * pill
+                + gap
+                + 2.0 * div_gap
+                + px(1.0)
+                + 2.0 * key
+                + px(8.0),
         );
         let h = snap(key + 2.0 * pad);
         let plate = Rect::from_min_size(ipos(well.max.x - px(16.0) - w, well.min.y + px(12.0)), vec2(w, h));
@@ -516,7 +529,16 @@ impl Highway {
             th.line,
         );
         x = snap(x + px(1.0) + div_gap);
-        let toggles = [(Icon::Invert, self.invert, "Invert strings", "I", "hw_invert")];
+        let toggles = [
+            (Icon::Invert, self.invert, "Invert strings", "I", "hw_invert"),
+            (
+                Icon::Lesson,
+                self.labels,
+                "Technique names over the notes",
+                "K",
+                "hw_labels",
+            ),
+        ];
         for (icon, on, label, keycap, act) in toggles {
             let r = Rect::from_min_size(ipos(x, cy - snap(key / 2.0)), Vec2::splat(key));
             let resp = interact(&tu, r, ("hw-tool", act), Sense::click());
@@ -1064,7 +1086,88 @@ fn face_icon(p: &Painter, r: Rect, tech: Techs, col: Color32, a: f32) {
         p.line_segment([pos2(c.x - s, y), pos2(c.x, y - s * 0.8)], st);
         p.line_segment([pos2(c.x, y - s * 0.8), pos2(c.x + s, y)], st);
     }
-    let _ = Techs::ACCENT;
+    if has(tech, Techs::ACCENT) {
+        // dấu nhấn: một hình > nhỏ, trắng, phía trên bên trái viên nốt
+        let (x0, y) = (r.min.x - w * 0.05, r.min.y - h * 0.35);
+        let st = Stroke::new((h * 0.12).max(1.2), white);
+        p.line_segment([pos2(x0 - w * 0.25, y - h * 0.18), pos2(x0, y)], st);
+        p.line_segment([pos2(x0, y), pos2(x0 - w * 0.25, y + h * 0.18)], st);
+    }
+}
+
+/// Tên kỹ thuật của một nốt (hoặc của cả hợp âm khi `chord` cho các nốt của nó), ngắn gọn bằng chữ in hoa:
+/// "BEND FULL", "HAMMER-ON", "SLIDE UP", "PALM MUTE"… Rỗng khi nốt không có kỹ thuật nào.
+fn tech_label(notes: &[&HwNote]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut add = |s: String| {
+        if !parts.contains(&s) {
+            parts.push(s);
+        }
+    };
+    for n in notes {
+        if n.bend > 0.0 {
+            // bend tính bằng nửa cung: 1 = ½, 2 = full, 3 = 1½…
+            let half = n.bend.round().max(1.0) as i64;
+            let amt = match half {
+                1 => "½".to_string(),
+                2 => "FULL".to_string(),
+                h if h % 2 == 0 => format!("{}", h / 2),
+                h => format!("{}½", h / 2),
+            };
+            add(format!("BEND {amt}"));
+        }
+        if n.slide_to > 0 {
+            add(if n.slide_to > n.fret {
+                "SLIDE UP"
+            } else {
+                "SLIDE DOWN"
+            }
+            .into());
+        }
+        for (t, name) in [
+            (Techs::HAMMER_ON, "HAMMER-ON"),
+            (Techs::PULL_OFF, "PULL-OFF"),
+            (Techs::VIBRATO, "VIBRATO"),
+            (Techs::PALM_MUTE, "PALM MUTE"),
+            (Techs::FRET_HAND_MUTE, "MUTE"),
+            (Techs::PINCH_HARMONIC, "PINCH HARMONIC"),
+            (Techs::TAP, "TAP"),
+            (Techs::TREMOLO, "TREMOLO"),
+            (Techs::SLAP, "SLAP"),
+            (Techs::POP, "POP"),
+            (Techs::ACCENT, "ACCENT"),
+        ] {
+            if has(n.tech, t) {
+                add(name.into());
+            }
+        }
+        if has(n.tech, Techs::HARMONIC) && !has(n.tech, Techs::PINCH_HARMONIC) {
+            add("HARMONIC".into());
+        }
+    }
+    parts.join(" · ")
+}
+
+/// Vẽ tên kỹ thuật trên một tấm nền tối nhỏ, căn giữa phía trên `at` (toạ độ màn hình).
+fn tech_tag(p: &Painter, at: Pos2, label: &str, size: f32, col: Color32, a: f32) {
+    if label.is_empty() || a <= 0.02 {
+        return;
+    }
+    let st = Style::new(size, 800, alpha(Color32::WHITE, a));
+    let tw = text::width(p.ctx(), label, st);
+    let (padx, pady) = (size * 0.45, size * 0.22);
+    let bg = Rect::from_center_size(
+        pos2(at.x, at.y - size * 0.6 - pady),
+        vec2(tw + 2.0 * padx, size * 1.2 + 2.0 * pady),
+    );
+    p.rect_filled(bg, size * 0.35, alpha(Color32::from_rgb(12, 16, 24), 0.78 * a));
+    p.rect_stroke(
+        bg,
+        size * 0.35,
+        Stroke::new(1.0, alpha(lut(col, 0.6), 0.9 * a)),
+        egui::StrokeKind::Inside,
+    );
+    text::draw(p, label, bg.center(), Align2::CENTER_CENTER, st, None);
 }
 
 /// Bend chevrons above a gem (screen pixels), between it and its tail, one per half step, pointing the way the string
@@ -1364,6 +1467,7 @@ fn draw(
     invert: bool,
     speed: f64,
     marks: &[Option<(Judgement, f32)>],
+    labels: bool,
 ) {
     // the camera: the planned view's middle under the vanishing point, zoomed in as far as Rocksmith goes (11 frets
     // across) unless the view's right half needs more room
@@ -1991,6 +2095,39 @@ fn draw(
                 col,
                 a,
             );
+        }
+        // tên kỹ thuật cho người mới: chỉ khi bật, chỉ cho nốt trong ~2,2 giây tới, mỗi hợp âm một nhãn (ở nốt dây
+        // cao nhất của nó, nằm trên cùng)
+        if labels && u < 2.2 && sr.height() >= 6.0 {
+            let group: Vec<&HwNote> = match n.chord {
+                Some(k) => {
+                    let lo = c.notes.partition_point(|m| m.t < n.t - 3e-3);
+                    let same: Vec<&HwNote> = c.notes[lo..]
+                        .iter()
+                        .take_while(|m| m.t < n.t + 3e-3)
+                        .filter(|m| m.chord == Some(k))
+                        .collect();
+                    // nhãn chỉ vẽ một lần: ở nốt có dây lớn nhất trong hợp âm
+                    if same.iter().any(|m| m.string > n.string) {
+                        Vec::new()
+                    } else {
+                        same
+                    }
+                }
+                None => vec![n],
+            };
+            let label = tech_label(&group);
+            if !label.is_empty() {
+                let up = g.row(n.string) > 0.0;
+                let lift = if n.bend > 0.0 && up {
+                    sr.height() * (0.35 + 0.32 * (n.bend.round().clamp(1.0, 4.0) as f32))
+                } else {
+                    sr.height() * 0.35
+                };
+                let size = (sr.height() * 0.45).clamp(9.0, 15.0);
+                let fade = a * ((2.2 - u) / 0.4).clamp(0.0, 1.0) as f32;
+                tech_tag(p, pos2(sr.center().x, sr.min.y - lift), &label, size, col, fade);
+            }
         }
     }
     while ci > ci0 {

@@ -748,6 +748,7 @@ impl PlayerView {
                 st.config
                     .f64("hw_camera", highway::CAMERA_DEFAULT as f64)
                     .max(0.0) as usize,
+                st.config.bool("hw_labels", true),
             ),
             hw_on: st.config.bool("view_highway", false),
             tools_rect: Rect::NOTHING,
@@ -1579,6 +1580,18 @@ impl PlayerView {
                     "",
                 );
             }
+            "hw_labels" => {
+                self.highway.labels = !self.highway.labels;
+                st.config.set("hw_labels", self.highway.labels);
+                self.say(
+                    if self.highway.labels {
+                        "Technique names on: BEND, HAMMER-ON, PALM MUTE… over the notes"
+                    } else {
+                        "Technique names off"
+                    },
+                    "",
+                );
+            }
             "hw_invert" => {
                 self.highway.invert = !self.highway.invert;
                 st.config.set("hw_invert", self.highway.invert);
@@ -2038,6 +2051,7 @@ impl PlayerView {
             Key::F if !ctrl => "tab_full",
             Key::V if !ctrl => "view",
             Key::I if !ctrl && self.hw_on => "hw_invert",
+            Key::K if !ctrl && self.hw_on => "hw_labels",
             Key::C if !ctrl => "tab_compact",
             Key::Space => "play",
             Key::Minus => "rewind",
