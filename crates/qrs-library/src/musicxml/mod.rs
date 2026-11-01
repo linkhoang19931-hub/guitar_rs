@@ -6,7 +6,7 @@
 //!   manifest.yaml            tên bài, tác giả, độ dài, các bè (tuning, capo) và hai stem
 //!   arrangements/<id>.json   nốt, hợp âm, vị trí tay (anchor), thế bấm (handshape) của từng bè
 //!   song_timeline.json       phách, ô nhịp và các đoạn (để vòng lặp theo đoạn)
-//!   stems/guitar.wav         tiếng guitar tổng hợp chơi đúng tab
+//!   stems/<bè>.wav           tiếng tổng hợp của từng bè (Lead, Rhythm, Bass…), mỗi bè một kênh riêng
 //!   stems/click.wav          tiếng gõ nhịp, có một ô đếm vào trước khi bài bắt đầu
 //!
 //! Hai stem tách riêng nên trong bộ trộn (mixer) của quickRS có thể tắt tiếng guitar để tự chơi theo nhịp.
@@ -27,7 +27,7 @@ use parse::{Score, TabNote};
 pub const SUFFIXES: [&str; 2] = ["musicxml", "mxl"];
 
 /// Đổi khi cách chuyển thay đổi, để các feedpak cũ được tạo lại.
-pub const IMPORTER_VERSION: &str = "1";
+pub const IMPORTER_VERSION: &str = "2";
 
 const GUITAR_STD: [i32; 6] = [40, 45, 50, 55, 59, 64];
 const BASS_STD: [i32; 6] = [28, 33, 38, 43, 47, 52];
@@ -511,10 +511,13 @@ pub fn build_score(score: &Score, file_stem: &str) -> Res<(BTreeMap<String, Vec<
 
     // từng bè
     let names = part_names(score);
-    let mut voices = Vec::new();
     let mut parts_out: Vec<PartOut> = Vec::new();
+    // tiếng tổng hợp của từng bè, để bộ trộn bật/tắt riêng (không trộn chung một kênh)
+    let mut part_voices: Vec<Vec<synth::Voice>> = Vec::new();
     for (i, p) in score.parts.iter().enumerate() {
+        let mut voices = Vec::new();
         let (mut v, n, c) = build_part(p, &tm, &mut voices, true);
+        part_voices.push(voices);
         let (id, name) = names[i].clone();
         v["name"] = json!(name);
         let tuning = v["tuning"]
@@ -547,10 +550,13 @@ pub fn build_score(score: &Score, file_stem: &str) -> Res<(BTreeMap<String, Vec<
         serde_json::to_vec_pretty(&json!({"beats": beats, "sections": sections_json}))
             .map_err(|e| XmlError(e.to_string()))?,
     );
-    files.insert(
-        "stems/guitar.wav".into(),
-        synth::wav(&synth::render_guitar(&voices, duration)),
-    );
+    let mut stems: Vec<Value> = Vec::new();
+    for (p, voices) in parts_out.iter().zip(&part_voices) {
+        let file = format!("stems/{}.wav", p.id);
+        files.insert(file.clone(), synth::wav(&synth::render_guitar(voices, duration)));
+        stems.push(json!({"id": p.id, "file": file, "name": format!("{} (synth)", p.name), "default": true}));
+    }
+    stems.push(json!({"id": "click", "file": "stems/click.wav", "name": "Click", "default": true}));
     files.insert(
         "stems/click.wav".into(),
         synth::wav(&synth::render_click(&clicks, duration)),
@@ -574,10 +580,7 @@ pub fn build_score(score: &Score, file_stem: &str) -> Res<(BTreeMap<String, Vec<
     manifest.insert("arrangements".into(), Value::Array(arrs));
     manifest.insert(
         "stems".into(),
-        json!([
-            {"id": "guitar", "file": "stems/guitar.wav", "name": "Guitar (synth)", "default": true},
-            {"id": "click", "file": "stems/click.wav", "name": "Click", "default": true},
-        ]),
+        Value::Array(stems),
     );
     manifest.insert("song_timeline".into(), json!("song_timeline.json"));
     manifest.insert("musicxml_importer".into(), json!(IMPORTER_VERSION));

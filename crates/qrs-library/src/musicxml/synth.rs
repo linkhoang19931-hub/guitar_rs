@@ -2,7 +2,8 @@
 //!
 //! Tiếng guitar dùng thuật toán Karplus–Strong (dây gảy): đủ để nghe đúng nốt, đúng nhịp khi tập.
 
-pub const RATE: u32 = 44_100;
+/// 22,05 kHz: đủ cho tiếng guitar tập luyện, file nhỏ bằng nửa (mỗi bè một kênh nên quan trọng).
+pub const RATE: u32 = 22_050;
 
 /// Một nốt cần phát: thời điểm (giây), độ dài (giây), cao độ MIDI, có phải nốt câm (dead note) không.
 #[derive(Clone, Debug)]
